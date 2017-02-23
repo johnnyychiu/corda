@@ -20,6 +20,8 @@ class ArgsParserTest {
                 help = false,
                 logToConsole = false,
                 loggingLevel = Level.INFO,
+                noLocalShell = false,
+                sshdServer = false,
                 isRegistration = false))
     }
 

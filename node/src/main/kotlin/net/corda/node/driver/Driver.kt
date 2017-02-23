@@ -156,12 +156,14 @@ fun <A> driver(
         isDebug: Boolean = false,
         driverDirectory: Path = Paths.get("build", getTimestampAsDirectoryName()),
         portAllocation: PortAllocation = PortAllocation.Incremental(10000),
+        sshdPortAllocation: PortAllocation = PortAllocation.Incremental(20000),
         debugPortAllocation: PortAllocation = PortAllocation.Incremental(5005),
         useTestClock: Boolean = false,
         dsl: DriverDSLExposedInterface.() -> A
 ) = genericDriver(
         driverDsl = DriverDSL(
                 portAllocation = portAllocation,
+                sshdPortAllocation = sshdPortAllocation,
                 debugPortAllocation = debugPortAllocation,
                 driverDirectory = driverDirectory.toAbsolutePath(),
                 useTestClock = useTestClock,
@@ -265,6 +267,7 @@ private fun <A> poll(
 
 open class DriverDSL(
         val portAllocation: PortAllocation,
+        val sshdPortAllocation: PortAllocation,
         val debugPortAllocation: PortAllocation,
         val driverDirectory: Path,
         val useTestClock: Boolean,
@@ -458,6 +461,7 @@ open class DriverDSL(
     private fun startNetworkMapService(): ListenableFuture<Process> {
         val debugPort = if (isDebug) debugPortAllocation.nextPort() else null
         val apiAddress = portAllocation.nextHostAndPort().toString()
+        val sshdAddress = portAllocation.nextHostAndPort().toString()
         val baseDirectory = driverDirectory / networkMapLegalName
         val config = ConfigHelper.loadConfig(
                 baseDirectory = baseDirectory,
@@ -468,6 +472,7 @@ open class DriverDSL(
                         //       node port numbers to be shifted, so all demos and docs need to be updated accordingly.
                         "webAddress" to apiAddress,
                         "artemisAddress" to networkMapAddress.toString(),
+                        "sshdAddress" to sshdAddress,
                         "useTestClock" to useTestClock
                 )
         )
@@ -529,7 +534,8 @@ open class DriverDSL(
                             "-cp", classpath,
                             className,
                             "--base-directory=${nodeConf.baseDirectory}",
-                            "--logging-level=$loggingLevel"
+                            "--logging-level=$loggingLevel",
+                            "--no-local-shell"
                     ).filter(String::isNotEmpty)
             val builder = ProcessBuilder(javaArgs)
             builder.redirectError(Paths.get("error.$className.log").toFile())

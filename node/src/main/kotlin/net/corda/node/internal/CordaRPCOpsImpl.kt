@@ -35,9 +35,9 @@ import java.util.*
  * thread (i.e. serially). Arguments are serialised and deserialised automatically.
  */
 class CordaRPCOpsImpl(
-        val services: ServiceHub,
-        val smm: StateMachineManager,
-        val database: Database
+        private val services: ServiceHub,
+        private val smm: StateMachineManager,
+        private val database: Database
 ) : CordaRPCOps {
     override val protocolVersion: Int get() = 0
 

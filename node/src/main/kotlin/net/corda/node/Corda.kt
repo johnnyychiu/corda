@@ -7,15 +7,32 @@ import net.corda.core.*
 import net.corda.core.utilities.Emoji
 import net.corda.node.internal.Node
 import net.corda.node.services.config.FullNodeConfiguration
+import net.corda.node.startShell
 import net.corda.node.utilities.ANSIProgressObserver
 import net.corda.node.utilities.registration.HTTPNetworkRegistrationService
 import net.corda.node.utilities.registration.NetworkRegistrationHelper
+import org.crsh.console.jline.JLineProcessor
+import org.crsh.console.jline.TerminalFactory
+import org.crsh.console.jline.console.ConsoleReader
+import org.crsh.shell.ShellFactory
+import org.crsh.standalone.Bootstrap
+import org.crsh.util.InterruptHandler
+import org.crsh.util.Utils
+import org.crsh.vfs.FS
+import org.crsh.vfs.spi.file.FileMountFactory
+import org.crsh.vfs.spi.url.ClassPathMountFactory
 import org.fusesource.jansi.Ansi
 import org.fusesource.jansi.AnsiConsole
 import org.slf4j.LoggerFactory
+import java.io.FileDescriptor
+import java.io.FileInputStream
 import java.lang.management.ManagementFactory
 import java.net.InetAddress
+import java.nio.file.Path
 import java.nio.file.Paths
+import java.util.*
+import java.util.logging.Level
+import kotlin.concurrent.thread
 import kotlin.system.exitProcess
 
 private var renderBasicInfoToConsole = true
@@ -60,7 +77,8 @@ fun main(args: Array<String>) {
 
     drawBanner()
 
-    System.setProperty("log-path", (cmdlineOptions.baseDirectory / "logs").toString())
+    val dir: Path = cmdlineOptions.baseDirectory.normalize()
+    System.setProperty("log-path", (dir / "logs").toString())
 
     val log = LoggerFactory.getLogger("Main")
     printBasicNodeInfo("Logs can be found in", System.getProperty("log-path"))
@@ -107,6 +125,10 @@ fun main(args: Array<String>) {
 
             if (renderBasicInfoToConsole)
                 ANSIProgressObserver(node.smm)
+
+            node.startupComplete.thenAccept {
+                startShell(dir, cmdlineOptions, node)
+            }
         } failure {
             log.error("Error during network map registration", it)
             exitProcess(1)

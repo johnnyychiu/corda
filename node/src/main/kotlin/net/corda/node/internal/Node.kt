@@ -34,6 +34,7 @@ import java.nio.file.Paths
 import java.time.Clock
 import javax.management.ObjectName
 import kotlin.concurrent.thread
+import java.util.concurrent.CompletableFuture
 
 /**
  * A Node manages a standalone server that takes part in the P2P network. It creates the services found in [ServiceHub],
@@ -196,6 +197,8 @@ class Node(override val configuration: FullNodeConfiguration,
         super.initialiseDatabasePersistence(insideTransaction)
     }
 
+    val startupComplete = CompletableFuture<Unit>()
+
     override fun start(): Node {
         alreadyRunningNodeCheck()
         super.start()
@@ -217,6 +220,8 @@ class Node(override val configuration: FullNodeConfiguration,
                     }.
                     build().
                     start()
+
+            startupComplete.complete(Unit)
         }
 
         shutdownThread = thread(start = false) {
