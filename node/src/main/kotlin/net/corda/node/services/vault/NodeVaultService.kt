@@ -98,7 +98,7 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
 //                            lockId?.let {
 //                                lockId = null
 //                                lockUpdateTime = services.clock.instant()
-//                                log.info("Releasing soft lock state: $stateRef")
+//                                log.trace("Releasing soft lock state: $stateRef")
 //                            }
                         update(state)
                     }
@@ -240,9 +240,10 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
             """
             try {
                 val statement = configuration.jdbcSession().createStatement()
+                log.debug(updateStatement)
                 val rs = statement.executeUpdate(updateStatement)
                 if (rs > 0) {
-                    log.info("Reserving soft lock states for $id: $stateRefs")
+                    log.trace("Reserving soft lock states for $id: $stateRefs")
                 }
             }
             catch (e: SQLException) {
@@ -262,9 +263,10 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
                 """
                 try {
                     val statement = configuration.jdbcSession().createStatement()
+                    log.debug(updateStatement)
                     val rs = statement.executeUpdate(updateStatement)
                     if (rs > 0) {
-                        log.info("Releasing ${stateRefs.count()} soft locked states for $id: $stateRefs")
+                        log.trace("Releasing ${stateRefs.count()} soft locked states for $id: $stateRefs")
                     }
                 } catch (e: SQLException) {
                     log.error("""soft lock update error attempting to release states: $stateRefs for $id
@@ -280,9 +282,10 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
                 """
             try {
                 val statement = configuration.jdbcSession().createStatement()
+                log.debug(updateStatement)
                 val rs = statement.executeUpdate(updateStatement)
                 if (rs > 0) {
-                    log.info("Releasing all soft locked states for $id") //: ${softLockedStates[id]}")
+                    log.trace("Releasing all soft locked states for $id") //: ${softLockedStates[id]}")
                 }
             } catch (e: SQLException) {
                 log.error("""soft lock update error attempting to release all states for $id
@@ -303,7 +306,7 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
         var lockStates = mutableListOf<StateAndRef<T>>()
         val statement = configuration.jdbcSession().createStatement()
         val rs = statement.executeQuery(selectForUpdateStatement)
-        println(selectForUpdateStatement)
+        log.debug(selectForUpdateStatement)
         while (rs.next()) {
             val txHash = SecureHash.parse(rs.getString(1))
             val index = rs.getInt(2)
@@ -392,12 +395,12 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
         mutex.locked {
             // exclude soft locked states reserved by others
             val softLockedStates = softLockedStates<Cash.State>()
-            softLockedStates.forEach { log.info("Excluding soft lock states for ${tx.lockId}: ${it.ref}") }
+            softLockedStates.forEach { log.trace("Excluding soft lock states for ${tx.lockId}: ${it.ref}") }
             acceptableCoins = acceptableCoins.minus(softLockedStates)
 
             // include soft locked states reserved by me
             val mySoftLockedStates = softLockedStates<Cash.State>(tx.lockId)
-            mySoftLockedStates.forEach { log.info("Including soft lock states for ${tx.lockId}: ${it.ref}") }
+            mySoftLockedStates.forEach { log.trace("Including soft lock states for ${tx.lockId}: ${it.ref}") }
             acceptableCoins = acceptableCoins.plus(mySoftLockedStates)
 
             // notary may be associated with locked state only
