@@ -23,13 +23,13 @@ class VaultSoftLockManager(val vault: VaultService, smm: StateMachineManager) {
 
     private fun registerSoftLock(id: StateMachineRunId, logic: FlowLogic<*>) {
         val flowClassName = logic.javaClass.simpleName
-        log.info("Reserving soft lock for flow ${flowClassName} with state manager id ${id.uuid}")
+        log.trace("Reserving soft lock for flow ${flowClassName} with state manager id ${id.uuid}")
         vault.softLockReserve(id.uuid, emptySet())
     }
 
     private fun  unregisterSoftLock(id: StateMachineRunId, logic: FlowLogic<*>) {
         val flowClassName = logic.javaClass.simpleName
-        log.info("Releasing soft lock for flow ${flowClassName} with state manager id ${id.uuid}")
+        log.trace("Releasing soft lock for flow ${flowClassName} with state manager id ${id.uuid}")
         vault.softLockRelease(id.uuid)
 
     }
