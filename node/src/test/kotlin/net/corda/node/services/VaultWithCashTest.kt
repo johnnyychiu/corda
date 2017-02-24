@@ -143,6 +143,9 @@ class VaultWithCashTest {
             assertNull(vault.cashBalances[USD])
             services.recordTransactions(usefulTX)
             println("Cash balance: ${vault.cashBalances[USD]}")
+
+            assertThat(vault.unconsumedStates<Cash.State>()).hasSize(1)
+            assertThat(vault.softLockedStates<Cash.State>()).hasSize(0)
         }
 
         val backgroundExecutor = Executors.newFixedThreadPool(2)
@@ -158,14 +161,25 @@ class VaultWithCashTest {
                                 signWith(DUMMY_NOTARY_KEY)
                             }.toSignedTransaction()
                     println("txn1: ${txn1.id} spent ${((txn1.tx.outputs[0].data) as Cash.State).amount}")
+                    println("""txn1 states:
+                                UNCONSUMED: ${vault.unconsumedStates<Cash.State>().count()} : ${vault.unconsumedStates<Cash.State>()},
+                                CONSUMED: ${vault.consumedStates<Cash.State>().count()} : ${vault.consumedStates<Cash.State>()},
+                                LOCKED: ${vault.softLockedStates<Cash.State>().count()} : ${vault.softLockedStates<Cash.State>()}
+                    """)
                     services.recordTransactions(txn1)
                     println("txn1: Cash balance: ${vault.cashBalances[USD]}")
+                    println("""txn1 states:
+                                UNCONSUMED: ${vault.unconsumedStates<Cash.State>().count()} : ${vault.unconsumedStates<Cash.State>()},
+                                CONSUMED: ${vault.consumedStates<Cash.State>().count()} : ${vault.consumedStates<Cash.State>()},
+                                LOCKED: ${vault.softLockedStates<Cash.State>().count()} : ${vault.softLockedStates<Cash.State>()}
+                    """)
                     txn1
                 }
                 catch(e: Exception) {
                     println(e)
                 }
             }
+            println("txn1 COMMITTED!")
             countDown.countDown()
         }
 
@@ -180,14 +194,26 @@ class VaultWithCashTest {
                                 signWith(DUMMY_NOTARY_KEY)
                             }.toSignedTransaction()
                     println("txn2: ${txn2.id} spent ${((txn2.tx.outputs[0].data) as Cash.State).amount}")
+                    println("""txn2 states:
+                                UNCONSUMED: ${vault.unconsumedStates<Cash.State>().count()} : ${vault.unconsumedStates<Cash.State>()},
+                                CONSUMED: ${vault.consumedStates<Cash.State>().count()} : ${vault.consumedStates<Cash.State>()},
+                                LOCKED: ${vault.softLockedStates<Cash.State>().count()} : ${vault.softLockedStates<Cash.State>()}
+                    """)
                     services.recordTransactions(txn2)
                     println("txn2: Cash balance: ${vault.cashBalances[USD]}")
+                    println("""txn2 states:
+                                UNCONSUMED: ${vault.unconsumedStates<Cash.State>().count()} : ${vault.unconsumedStates<Cash.State>()},
+                                CONSUMED: ${vault.consumedStates<Cash.State>().count()} : ${vault.consumedStates<Cash.State>()},
+                                LOCKED: ${vault.softLockedStates<Cash.State>().count()} : ${vault.softLockedStates<Cash.State>()}
+                    """)
                     txn2
                 }
                 catch(e: Exception) {
                     println(e)
                 }
             }
+            println("txn2 COMMITTED!")
+
             countDown.countDown()
         }
 

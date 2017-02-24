@@ -650,11 +650,25 @@ class VaultSchemaTest {
         // update refs with soft lock id
         val stateRefs = refs.fold("") { stateRefs, it -> stateRefs + "('${it.txhash}','${it.index}')," }.dropLast(1)
         val lockId = "LOCK#1"
-        val updateStatement = """
-            UPDATE VAULT_STATES SET lock_id = '$lockId', lock_timestamp = '${Instant.now()}' WHERE ((transaction_id, output_index) IN ($stateRefs));
+        val selectForUpdateStatement = """
+            SELECT transaction_id, output_index, lock_id, lock_timestamp FROM VAULT_STATES
+            WHERE ((transaction_id, output_index) IN ($stateRefs)) FOR UPDATE
         """
+
         val statement = jdbcConn.createStatement()
-        statement.executeUpdate(updateStatement)
+        println(selectForUpdateStatement)
+        val rs = statement.executeQuery(selectForUpdateStatement)
+        while (rs.next()) {
+            val txHash = SecureHash.parse(rs.getString(1))
+            val index = rs.getInt(2)
+            val statement = jdbcConn.createStatement()
+            val updateStatement = """
+             UPDATE VAULT_STATES SET lock_id = '$lockId', lock_timestamp = '${Instant.now()}'
+             WHERE (transaction_id = '$txHash' AND output_index = $index)
+        """
+            println(updateStatement)
+            statement.executeUpdate(updateStatement)
+        }
 
         // count locked state refs
         val selectStatement = """
