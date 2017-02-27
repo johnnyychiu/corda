@@ -2,10 +2,7 @@ package net.corda.node.services
 
 import net.corda.contracts.asset.Cash
 import net.corda.contracts.testing.fillWithSomeTestCash
-import net.corda.core.contracts.DOLLARS
-import net.corda.core.contracts.POUNDS
-import net.corda.core.contracts.TransactionType
-import net.corda.core.contracts.`issued by`
+import net.corda.core.contracts.*
 import net.corda.core.crypto.composite
 import net.corda.core.node.services.TxWritableStorageService
 import net.corda.core.node.services.VaultService
@@ -13,8 +10,9 @@ import net.corda.core.node.services.unconsumedStates
 import net.corda.core.transactions.SignedTransaction
 import net.corda.core.utilities.DUMMY_NOTARY
 import net.corda.core.utilities.LogHelper
+import net.corda.node.services.schema.HibernateObserver
+import net.corda.node.services.schema.NodeSchemaService
 import net.corda.node.services.vault.NodeVaultService
-import net.corda.node.services.vault.schemas.VaultSchema
 import net.corda.node.utilities.configureDatabase
 import net.corda.node.utilities.databaseTransaction
 import net.corda.testing.MEGA_CORP
@@ -157,6 +155,42 @@ class NodeVaultServiceTest {
 
             // should be back to original states
             assertThat(unconsumedStates).isEqualTo(unlockedStates)
+        }
+    }
+
+    lateinit var servicesSL: MockServices
+    lateinit var persister: HibernateObserver
+
+    @Test
+    fun `states soft locking query granularity`() {
+        databaseTransaction(database) {
+            servicesSL = object : MockServices() {
+                override val vaultService: NodeVaultService = NodeVaultService(this, dataSourceProps)
+
+                override fun recordTransactions(txs: Iterable<SignedTransaction>) {
+                    for (stx in txs) {
+                        storageService.validatedTransactions.addTransaction(stx)
+                        vaultService.notify(stx.tx)
+                    }
+                }
+            }
+            persister = HibernateObserver(servicesSL.vaultService, NodeSchemaService())
+
+            servicesSL.fillWithSomeTestCash(100.DOLLARS, DUMMY_NOTARY, 10, 10, Random(0L))
+            servicesSL.fillWithSomeTestCash(100.POUNDS, DUMMY_NOTARY, 10, 10, Random(0L))
+            servicesSL.fillWithSomeTestCash(100.SWISS_FRANCS, DUMMY_NOTARY, 10, 10, Random(0L))
+        }
+
+        databaseTransaction(database) {
+            val allStates = servicesSL.vaultService.unconsumedStates<Cash.State>()
+            assertThat(allStates).hasSize(30)
+
+            for (i in 1..5 ) {
+                val spendableStatesUSD = (servicesSL.vaultService as NodeVaultService).unconsumedStatesForSpending<Cash.State>(20.DOLLARS)
+                spendableStatesUSD.forEach(::println)
+                servicesSL.vaultService.softLockReserve(UUID.randomUUID(), spendableStatesUSD.map { it.ref }.toSet())
+            }
+            assertThat(servicesSL.vaultService.softLockedStates<Cash.State>()).hasSize(10)
         }
     }
 

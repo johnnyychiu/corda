@@ -11,6 +11,7 @@ import net.corda.core.bufferUntilSubscribed
 import net.corda.core.contracts.*
 import net.corda.core.crypto.AnonymousParty
 import net.corda.core.crypto.CompositeKey
+import net.corda.core.crypto.Party
 import net.corda.core.crypto.SecureHash
 import net.corda.core.node.ServiceHub
 import net.corda.core.node.services.Vault
@@ -295,29 +296,68 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
         }
     }
 
-    private fun <T : ContractState> unconsumedStatesForUpdate(/* TODO: add selection criteria for bucketed query */): List<StateAndRef<T>> {
-        val selectForUpdateStatement = """
-            SELECT transaction_id, output_index, contract_state, notary_name, notary_key
-                    FROM vault_states
-                    WHERE (state_status = 0) and (lock_id is null) and (contract_state_class_name = '${Cash.State::class.java.name}')
-                    FOR UPDATE
-        """
-        // Retrieve locked states
-        var lockStates = mutableListOf<StateAndRef<T>>()
-        val statement = configuration.jdbcSession().createStatement()
-        val rs = statement.executeQuery(selectForUpdateStatement)
-        log.debug(selectForUpdateStatement)
-        while (rs.next()) {
-            val txHash = SecureHash.parse(rs.getString(1))
-            val index = rs.getInt(2)
-            val stateRef = StateRef(txHash, index)
-            // TODO: revisit Kryo bug when using THREAD_LOCAL_KYRO
-            val state = rs.getBytes(3).deserialize<TransactionState<T>>(createKryo())
-            lockStates.add(StateAndRef(state, stateRef))
-        }
-        log.trace("Locked ${lockStates.count()} rows FOR UPDATE with states: ${lockStates}")
+    fun <T : ContractState> unconsumedStatesForSpending(amount: Amount<Currency>, onlyFromIssuerParties: Set<AnonymousParty>? = null, notary: Party? = null): List<StateAndRef<T>> {
 
-        return lockStates
+        val issuerKeysStr =
+            onlyFromIssuerParties?.let {
+                it.fold("") { issuerKeysStr, it -> issuerKeysStr + "('${it.owningKey.toBase58String()}')," }.dropLast(1)
+            }
+
+        mutex.locked {
+            configuration.jdbcSession().createStatement().execute("CALL SET(@t, 0);")
+
+            val selectJoin = """
+                SELECT vs.transaction_id, vs.output_index, SET(@t, ifnull(@t,0)+ccs.pennies) total_pennies
+                FROM vault_states AS vs, contract_cash_states AS ccs
+                WHERE vs.transaction_id = ccs.transaction_id AND vs.output_index = ccs.output_index
+                AND vs.state_status = 0 AND vs.lock_id is null
+                AND ccs.ccy_code = '${amount.token}' and @t <= ${amount.quantity}
+            """ +
+                    (if (notary != null)
+                " AND vs.notary_key = '${notary.owningKey.toBase58String()}'" else "") +
+                    (if (issuerKeysStr != null)
+                " AND ccs.issuer_key IN $issuerKeysStr" else "")
+
+            // Retrieve spendable state refs
+            var stateRefs = mutableListOf<StateRef>()
+            val statement1 = configuration.jdbcSession().createStatement()
+            val rs1 = statement1.executeQuery(selectJoin)
+            log.debug(selectJoin)
+            while (rs1.next()) {
+                val txHash = SecureHash.parse(rs1.getString(1))
+                val index = rs1.getInt(2)
+                stateRefs.add(StateRef(txHash, index))
+            }
+
+            if (stateRefs.isNotEmpty()) {
+
+                val stateRefsAsStr = stateRefs.fold("") { stateRefsAsStr, it -> stateRefsAsStr + "('${it.txhash}','${it.index}')," }.dropLast(1)
+                val selectForUpdateStatement = """
+                    SELECT transaction_id, output_index, contract_state, notary_name, notary_key
+                    FROM vault_states
+                    WHERE (transaction_id, output_index) IN ($stateRefsAsStr)
+                    FOR UPDATE
+                """
+                // Retrieve locked states
+                var lockStates = mutableListOf<StateAndRef<T>>()
+                val statement = configuration.jdbcSession().createStatement()
+                val rs = statement.executeQuery(selectForUpdateStatement)
+                log.debug(selectForUpdateStatement)
+                while (rs.next()) {
+                    val txHash = SecureHash.parse(rs.getString(1))
+                    val index = rs.getInt(2)
+                    val stateRef = StateRef(txHash, index)
+                    // TODO: revisit Kryo bug when using THREAD_LOCAL_KYRO
+                    val state = rs.getBytes(3).deserialize<TransactionState<T>>(createKryo())
+                    lockStates.add(StateAndRef(state, stateRef))
+                }
+                log.trace("Locked ${lockStates.count()} rows FOR UPDATE with states: ${lockStates}")
+
+                return lockStates
+            }
+        }
+        log.warn("No spendable states identified for $amount")
+        return emptyList()
     }
 
     override fun <T : ContractState> softLockedStates(lockId: UUID?): List<StateAndRef<T>> {
@@ -372,45 +412,17 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
         //
         // Finally, we add the states to the provided partial transaction.
 
-        // TODO: select for update ensures consistent data visibility for soft locking, but will also exhibit poor concurrency performance.
-        //       Require a means of bucketing state refs so can be queried in parallel (similar to ConcurrentHashMap)
-        val assetsStates = unconsumedStatesForUpdate<Cash.State>()
+        // retrieve unspent and unlocked cash states that meet out spending criteria
+        val acceptableCoins = unconsumedStatesForSpending<Cash.State>(amount, onlyFromParties, tx.notary)
 
-        val currency = amount.token
-        var acceptableCoins = run {
-            val ofCurrency = assetsStates.filter { it.state.data.amount.token.product == currency }
-            if (onlyFromParties != null)
-                ofCurrency.filter { it.state.data.amount.token.issuer.party in onlyFromParties }
-            else
-                ofCurrency
-        }
-        tx.notary = acceptableCoins.firstOrNull()?.state?.notary
         // TODO: We should be prepared to produce multiple transactions spending inputs from
         // different notaries, or at least group states by notary and take the set with the
         // highest total value
-        acceptableCoins = acceptableCoins.filter { it.state.notary == tx.notary }
 
-        var gathered: List<StateAndRef<Cash.State>> = emptyList()
-        var gatheredAmount: Amount<Currency> = Amount(0, USD)
-        mutex.locked {
-            // exclude soft locked states reserved by others
-            val softLockedStates = softLockedStates<Cash.State>()
-            softLockedStates.forEach { log.trace("Excluding soft lock states for ${tx.lockId}: ${it.ref}") }
-            acceptableCoins = acceptableCoins.minus(softLockedStates)
-
-            // include soft locked states reserved by me
-            val mySoftLockedStates = softLockedStates<Cash.State>(tx.lockId)
-            mySoftLockedStates.forEach { log.trace("Including soft lock states for ${tx.lockId}: ${it.ref}") }
-            acceptableCoins = acceptableCoins.plus(mySoftLockedStates)
-
-            // notary may be associated with locked state only
-            tx.notary = acceptableCoins.firstOrNull()?.state?.notary
-
-            val gatheredCoins = gatherCoins(acceptableCoins, amount)
-            gathered = gatheredCoins.first
-            gatheredAmount = gatheredCoins.second
-            softLockReserve(tx.lockId, gathered.map { it.ref }.toSet())
-        }
+        val gatheredCoins = gatherCoins(acceptableCoins, amount)
+        val gathered = gatheredCoins.first
+        val gatheredAmount = gatheredCoins.second
+        softLockReserve(tx.lockId, gathered.map { it.ref }.toSet())
 
         val takeChangeFrom = gathered.firstOrNull()
         val change = if (takeChangeFrom != null && gatheredAmount > amount) {

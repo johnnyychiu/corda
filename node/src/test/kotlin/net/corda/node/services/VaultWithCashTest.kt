@@ -15,6 +15,8 @@ import net.corda.core.transactions.SignedTransaction
 import net.corda.core.utilities.DUMMY_NOTARY
 import net.corda.core.utilities.DUMMY_NOTARY_KEY
 import net.corda.core.utilities.LogHelper
+import net.corda.node.services.schema.HibernateObserver
+import net.corda.node.services.schema.NodeSchemaService
 import net.corda.node.services.vault.NodeVaultService
 import net.corda.node.utilities.configureDatabase
 import net.corda.node.utilities.databaseTransaction
@@ -43,6 +45,7 @@ class VaultWithCashTest {
     val vault: VaultService get() = services.vaultService
     lateinit var dataSource: Closeable
     lateinit var database: Database
+    lateinit var persister: HibernateObserver
 
     @Before
     fun setUp() {
@@ -63,6 +66,7 @@ class VaultWithCashTest {
                     vaultService.notifyAll(txs.map { it.tx })
                 }
             }
+            persister = HibernateObserver(services.vaultService, NodeSchemaService())
         }
     }
 

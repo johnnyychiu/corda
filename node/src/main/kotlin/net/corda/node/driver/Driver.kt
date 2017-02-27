@@ -524,7 +524,7 @@ open class DriverDSL(
                     listOf(
                             "-javaagent:$quasarJarPath",
                             debugPortArg,
-                            "-Xmx200m",
+                            "-Xmx512m",
                             "-XX:+UseG1GC",
                             "-cp", classpath,
                             className,
