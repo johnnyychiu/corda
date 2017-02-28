@@ -85,7 +85,7 @@ class Node {
      * @param artemisPort The artemis messaging queue port.
      */
     void artemisPort(Integer artemisPort) {
-        config = config.withValue("artemisAddress",
+        config = config.withValue("messagingAddress",
                 ConfigValueFactory.fromAnyRef("$DEFAULT_HOST:$artemisPort".toString()))
     }
 
@@ -143,7 +143,7 @@ class Node {
      * @return This node's artemis address.
      */
     String getArtemisAddress() {
-        return config.getString("artemisAddress")
+        return config.getString("messagingAddress")
     }
 
     /**

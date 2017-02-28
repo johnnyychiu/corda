@@ -125,8 +125,8 @@ class Node(override val configuration: FullNodeConfiguration,
 
         val serverAddress = with(configuration) {
             messagingServerAddress ?: {
-                messageBroker = ArtemisMessagingServer(this, artemisAddress, rpcAddress, services.networkMapCache, userService)
-                artemisAddress
+                messageBroker = ArtemisMessagingServer(this, messagingAddress, rpcAddress, services.networkMapCache, userService)
+                messagingAddress
             }()
         }
         val myIdentityOrNullIfNetworkMapService = if (networkMapAddress != null) obtainLegalIdentity().owningKey else null

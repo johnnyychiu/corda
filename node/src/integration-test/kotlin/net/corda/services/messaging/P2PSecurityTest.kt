@@ -29,7 +29,7 @@ class P2PSecurityTest : NodeBasedTest() {
         val incorrectNetworkMapName = random63BitValue().toString()
         val node = startNode("Bob", configOverrides = mapOf(
                 "networkMapService" to mapOf(
-                        "address" to networkMapNode.configuration.artemisAddress.toString(),
+                        "address" to networkMapNode.configuration.messagingAddress.toString(),
                         "legalName" to incorrectNetworkMapName
                 )
         ))
@@ -54,7 +54,7 @@ class P2PSecurityTest : NodeBasedTest() {
         val config = TestNodeConfiguration(
                 baseDirectory = tempFolder.root.toPath() / legalName,
                 myLegalName = legalName,
-                networkMapService = NetworkMapInfo(networkMapNode.configuration.artemisAddress, networkMapNode.info.legalIdentity.name))
+                networkMapService = NetworkMapInfo(networkMapNode.configuration.messagingAddress, networkMapNode.info.legalIdentity.name))
         config.configureWithDevSSLCertificate() // This creates the node's TLS cert with the CN as the legal name
         return SimpleNode(config).apply { start() }
     }
