@@ -6,6 +6,14 @@ Here are brief summaries of what's changed between each snapshot release.
 Milestone 9
 -----------
 
+* Important: There are confguration changes in M9 due to the split of the Artemis port into separate messaging and RPC ports.
+  To upgrade, you *must* replace any references to ``artemisPort`` in Gradle build configurations, with ``messagingPort``. In
+  node configurations you need to replace ``artemisAddress`` with ``messagingAddress``.
+
+* Configuration:
+    * Replace ``artemisPort`` with ``messagingPort`` in Gradle configuration
+    * Replace ``artemisAddress`` with ``messagingAddress`` in node configuration
+
 * API:
 
     * Pseudonymous ``AnonymousParty`` class added as a superclass of ``Party``.

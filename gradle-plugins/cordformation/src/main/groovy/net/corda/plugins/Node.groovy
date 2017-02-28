@@ -82,11 +82,11 @@ class Node {
     /**
      * Set the artemis port for this node.
      *
-     * @param artemisPort The artemis messaging queue port.
+     * @param messagingPort The artemis messaging queue port.
      */
-    void artemisPort(Integer artemisPort) {
+    void messagingPort(Integer messagingPort) {
         config = config.withValue("messagingAddress",
-                ConfigValueFactory.fromAnyRef("$DEFAULT_HOST:$artemisPort".toString()))
+                ConfigValueFactory.fromAnyRef("$DEFAULT_HOST:$messagingPort".toString()))
     }
 
     /**

@@ -807,7 +807,7 @@ like to deploy for testing. See further details below:
           name "Controller"                                // Artemis name of node to be deployed.
           nearestCity "London"                             // For use with the network visualiser.
           advertisedServices = ["corda.notary.validating"] // A list of services you wish the node to offer.
-          artemisPort 10002
+          messagingPort 10002
           webPort 10003                                    // Usually 1 higher than the Artemis port.
           cordapps = []                                    // Add package names of CordaApps.
       }
@@ -815,7 +815,7 @@ like to deploy for testing. See further details below:
           name "NodeA"
           nearestCity "London"
           advertisedServices = []
-          artemisPort 10004
+          messagingPort 10004
           webPort 10005
           cordapps = []
       }
