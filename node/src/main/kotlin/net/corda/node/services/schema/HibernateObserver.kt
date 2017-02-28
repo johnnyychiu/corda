@@ -35,6 +35,9 @@ class HibernateObserver(vaultService: VaultService, val schemaService: SchemaSer
     val sessionFactories = ConcurrentHashMap<MappedSchema, SessionFactory>()
 
     init {
+        schemaService.schemaOptions.map { it.key }.forEach {
+            makeSessionFactoryForSchema(it)
+        }
         vaultService.rawUpdates.subscribe { persist(it.produced) }
     }
 
