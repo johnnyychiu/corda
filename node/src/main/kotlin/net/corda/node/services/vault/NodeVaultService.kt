@@ -296,7 +296,7 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
         }
     }
 
-    fun <T : ContractState> unconsumedStatesForSpending(amount: Amount<Currency>, onlyFromIssuerParties: Set<AnonymousParty>? = null, notary: Party? = null): List<StateAndRef<T>> {
+    fun <T : ContractState> unconsumedStatesForSpending(amount: Amount<Currency>, onlyFromIssuerParties: Set<AnonymousParty>? = null, notary: Party? = null, lockId: UUID? = null): List<StateAndRef<T>> {
 
         val issuerKeysStr =
             onlyFromIssuerParties?.let {
@@ -310,13 +310,16 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
                 SELECT vs.transaction_id, vs.output_index, SET(@t, ifnull(@t,0)+ccs.pennies) total_pennies
                 FROM vault_states AS vs, contract_cash_states AS ccs
                 WHERE vs.transaction_id = ccs.transaction_id AND vs.output_index = ccs.output_index
-                AND vs.state_status = 0 AND vs.lock_id is null
+                AND vs.state_status = 0
                 AND ccs.ccy_code = '${amount.token}' and @t <= ${amount.quantity}
             """ +
                     (if (notary != null)
                 " AND vs.notary_key = '${notary.owningKey.toBase58String()}'" else "") +
                     (if (issuerKeysStr != null)
-                " AND ccs.issuer_key IN $issuerKeysStr" else "")
+                " AND ccs.issuer_key IN $issuerKeysStr" else "") +
+                    (if (lockId != null)
+                         " AND (vs.lock_id is null OR vs.lock_id = '$lockId')"
+                    else " AND vs.lock_id is null")
 
             // Retrieve spendable state refs
             var stateRefs = mutableListOf<StateRef>()
@@ -413,11 +416,14 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
         // Finally, we add the states to the provided partial transaction.
 
         // retrieve unspent and unlocked cash states that meet out spending criteria
-        val acceptableCoins = unconsumedStatesForSpending<Cash.State>(amount, onlyFromParties, tx.notary)
+        val acceptableCoins = unconsumedStatesForSpending<Cash.State>(amount, onlyFromParties, tx.notary, tx.lockId)
 
         // TODO: We should be prepared to produce multiple transactions spending inputs from
         // different notaries, or at least group states by notary and take the set with the
         // highest total value
+
+        // notary may be associated with locked state only
+        tx.notary = acceptableCoins.firstOrNull()?.state?.notary
 
         val gatheredCoins = gatherCoins(acceptableCoins, amount)
         val gathered = gatheredCoins.first
@@ -489,8 +495,12 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
             gatheredAmount += Amount(c.state.data.amount.quantity, amount.token)
         }
 
-        if (gatheredAmount < amount)
+        if (gatheredAmount < amount) {
+            log.trace("Insufficient balance: requested $amount, available $gatheredAmount}")
             throw InsufficientBalanceException(amount - gatheredAmount)
+        }
+
+        log.trace("Gathered coins: requested $amount, available $gatheredAmount, change: ${gatheredAmount - amount}}")
 
         return Pair(gathered, gatheredAmount)
     }
