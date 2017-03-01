@@ -239,19 +239,21 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
                 UPDATE VAULT_STATES SET lock_id = '$id', lock_timestamp = '${services.clock.instant()}'
                 WHERE ((transaction_id, output_index) IN ($stateRefsAsStr));
             """
+            val statement = configuration.jdbcSession().createStatement()
+            log.debug(updateStatement)
             try {
-                val statement = configuration.jdbcSession().createStatement()
-                log.debug(updateStatement)
                 val rs = statement.executeUpdate(updateStatement)
                 if (rs > 0) {
                     log.trace("Reserving soft lock states for $id: $stateRefs")
                 }
+                statement.close()
             }
             catch (e: SQLException) {
                 log.error("""soft lock update error attempting to reserve states: $stateRefs for $id
                             $e.
                         """)
             }
+            finally { statement.close() }
         }
     }
 
@@ -262,9 +264,9 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
                 val updateStatement = """
                     UPDATE VAULT_STATES SET lock_id = null, lock_timestamp = '${services.clock.instant()}' WHERE ((transaction_id, output_index) IN ($stateRefsAsStr));
                 """
+                val statement = configuration.jdbcSession().createStatement()
+                log.debug(updateStatement)
                 try {
-                    val statement = configuration.jdbcSession().createStatement()
-                    log.debug(updateStatement)
                     val rs = statement.executeUpdate(updateStatement)
                     if (rs > 0) {
                         log.trace("Releasing ${stateRefs.count()} soft locked states for $id: $stateRefs")
@@ -274,6 +276,7 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
                             $e.
                         """)
                 }
+                finally { statement.close() }
             }
         }
 
@@ -281,9 +284,9 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
             val updateStatement = """
                     UPDATE VAULT_STATES SET lock_id = null, lock_timestamp = '${services.clock.instant()}' WHERE (lock_id = '$id');
                 """
+            val statement = configuration.jdbcSession().createStatement()
+            log.debug(updateStatement)
             try {
-                val statement = configuration.jdbcSession().createStatement()
-                log.debug(updateStatement)
                 val rs = statement.executeUpdate(updateStatement)
                 if (rs > 0) {
                     log.trace("Releasing all soft locked states for $id") //: ${softLockedStates[id]}")
@@ -293,6 +296,7 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
                             $e.
                         """)
             }
+            finally { statement.close() }
         }
     }
 
@@ -304,61 +308,67 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
             }
 
         mutex.locked {
-            configuration.jdbcSession().createStatement().execute("CALL SET(@t, 0);")
+            val statement = configuration.jdbcSession().createStatement()
+            try {
+                statement.execute("CALL SET(@t, 0);")
 
-            val selectJoin = """
+                val selectJoin = """
                 SELECT vs.transaction_id, vs.output_index, SET(@t, ifnull(@t,0)+ccs.pennies) total_pennies
                 FROM vault_states AS vs, contract_cash_states AS ccs
                 WHERE vs.transaction_id = ccs.transaction_id AND vs.output_index = ccs.output_index
                 AND vs.state_status = 0
                 AND ccs.ccy_code = '${amount.token}' and @t <= ${amount.quantity}
             """ +
-                    (if (notary != null)
-                " AND vs.notary_key = '${notary.owningKey.toBase58String()}'" else "") +
-                    (if (issuerKeysStr != null)
-                " AND ccs.issuer_key IN $issuerKeysStr" else "") +
-                    (if (lockId != null)
-                         " AND (vs.lock_id is null OR vs.lock_id = '$lockId')"
-                    else " AND vs.lock_id is null")
+                        (if (notary != null)
+                            " AND vs.notary_key = '${notary.owningKey.toBase58String()}'" else "") +
+                        (if (issuerKeysStr != null)
+                            " AND ccs.issuer_key IN $issuerKeysStr" else "") +
+                        (if (lockId != null)
+                            " AND (vs.lock_id is null OR vs.lock_id = '$lockId')"
+                        else " AND vs.lock_id is null")
 
-            // Retrieve spendable state refs
-            var stateRefs = mutableListOf<StateRef>()
-            val statement1 = configuration.jdbcSession().createStatement()
-            val rs1 = statement1.executeQuery(selectJoin)
-            log.debug(selectJoin)
-            while (rs1.next()) {
-                val txHash = SecureHash.parse(rs1.getString(1))
-                val index = rs1.getInt(2)
-                stateRefs.add(StateRef(txHash, index))
-            }
+                // Retrieve spendable state refs
+                var stateRefs = mutableListOf<StateRef>()
+                val rs1 = statement.executeQuery(selectJoin)
+                log.debug(selectJoin)
+                while (rs1.next()) {
+                    val txHash = SecureHash.parse(rs1.getString(1))
+                    val index = rs1.getInt(2)
+                    stateRefs.add(StateRef(txHash, index))
+                }
 
-            if (stateRefs.isNotEmpty()) {
-
-                val stateRefsAsStr = stateRefs.fold("") { stateRefsAsStr, it -> stateRefsAsStr + "('${it.txhash}','${it.index}')," }.dropLast(1)
-                val selectForUpdateStatement = """
+                if (stateRefs.isNotEmpty()) {
+                    val stateRefsAsStr = stateRefs.fold("") { stateRefsAsStr, it -> stateRefsAsStr + "('${it.txhash}','${it.index}')," }.dropLast(1)
+                    val selectForUpdateStatement = """
                     SELECT transaction_id, output_index, contract_state, notary_name, notary_key
                     FROM vault_states
                     WHERE (transaction_id, output_index) IN ($stateRefsAsStr)
                     FOR UPDATE
                 """
-                // Retrieve locked states
-                var lockStates = mutableListOf<StateAndRef<T>>()
-                val statement = configuration.jdbcSession().createStatement()
-                val rs = statement.executeQuery(selectForUpdateStatement)
-                log.debug(selectForUpdateStatement)
-                while (rs.next()) {
-                    val txHash = SecureHash.parse(rs.getString(1))
-                    val index = rs.getInt(2)
-                    val stateRef = StateRef(txHash, index)
-                    // TODO: revisit Kryo bug when using THREAD_LOCAL_KYRO
-                    val state = rs.getBytes(3).deserialize<TransactionState<T>>(createKryo())
-                    lockStates.add(StateAndRef(state, stateRef))
-                }
-                log.trace("Locked ${lockStates.count()} rows FOR UPDATE with states: ${lockStates}")
+                    // Retrieve locked states
+                    var lockStates = mutableListOf<StateAndRef<T>>()
+                    val rs = statement.executeQuery(selectForUpdateStatement)
+                    log.debug(selectForUpdateStatement)
+                    while (rs.next()) {
+                        val txHash = SecureHash.parse(rs.getString(1))
+                        val index = rs.getInt(2)
+                        val stateRef = StateRef(txHash, index)
+                        // TODO: revisit Kryo bug when using THREAD_LOCAL_KYRO
+                        val state = rs.getBytes(3).deserialize<TransactionState<T>>(createKryo())
+                        lockStates.add(StateAndRef(state, stateRef))
+                    }
+                    log.trace("Locked ${lockStates.count()} rows FOR UPDATE with states: ${lockStates}")
 
-                return lockStates
+                    return lockStates
+                }
+            } catch (e: SQLException) {
+                log.error("""Failed retrieving unconsumed states for: amount [$amount], onlyFromIssuerParties [$onlyFromIssuerParties], notary [$notary], lockId [$lockId]
+                            $e.
+                        """)
             }
+            finally { statement.close() }
         }
+
         log.warn("No spendable states identified for $amount")
         return emptyList()
     }
@@ -517,16 +527,23 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
             // TODO: using native JDBC until requery supports SELECT WHERE COMPOSITE_KEY IN
             // https://github.com/requery/requery/issues/434
             val statement = configuration.jdbcSession().createStatement()
-            val rs = statement.executeQuery("SELECT transaction_id, output_index, contract_state " +
-                    "FROM vault_states " +
-                    "WHERE ((transaction_id, output_index) IN ($stateRefs)) " +
-                    "AND (state_status = 0)")
-            while (rs.next()) {
-                val txHash = SecureHash.parse(rs.getString(1))
-                val index = rs.getInt(2)
-                val state = rs.getBytes(3).deserialize<TransactionState<ContractState>>(createKryo())
-                consumedStates.add(StateAndRef(state, StateRef(txHash, index)))
+            try {
+                val rs = statement.executeQuery("SELECT transaction_id, output_index, contract_state " +
+                        "FROM vault_states " +
+                        "WHERE ((transaction_id, output_index) IN ($stateRefs)) " +
+                        "AND (state_status = 0)")
+                while (rs.next()) {
+                    val txHash = SecureHash.parse(rs.getString(1))
+                    val index = rs.getInt(2)
+                    val state = rs.getBytes(3).deserialize<TransactionState<ContractState>>(createKryo())
+                    consumedStates.add(StateAndRef(state, StateRef(txHash, index)))
+                }
+            } catch (e: SQLException) {
+                log.error("""Failed retrieving state refs for: $stateRefs
+                            $e.
+                        """)
             }
+            finally { statement.close() }
         }
 
         // Is transaction irrelevant?
