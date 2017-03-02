@@ -22,4 +22,5 @@ include 'samples:network-visualiser'
 include 'samples:simm-valuation-demo'
 include 'samples:raft-notary-demo'
 include 'samples:bank-of-corda-demo'
-
+include 'client:jackson'
+findProject(':client:jackson')?.name = 'jackson'
