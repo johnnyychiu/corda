@@ -1,0 +1,29 @@
+group 'net.corda'
+version '0.9-SNAPSHOT'
+
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+    dependencies {
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'kotlin'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile "org.jetbrains.kotlin:kotlin-stdlib:$kotlin_version"
+
+    compile project(':core')
+    compile project(':node') // TODO: Break this dependency
+
+    compile ("com.fasterxml.jackson.module:jackson-module-kotlin:${jackson_version}")
+
+    testCompile group: 'junit', name: 'junit', version: '4.11'
+}
