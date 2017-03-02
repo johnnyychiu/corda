@@ -28,9 +28,13 @@ dependencies {
     compile "org.jetbrains.kotlin:kotlin-stdlib-jre8:$kotlin_version"
 
     compile project(':core')
-    compile project(':node') // TODO: Break this dependency
 
-    compile ("com.fasterxml.jackson.module:jackson-module-kotlin:${jackson_version}")
+    // Jackson and its plugins: parsing to/from JSON and other textual formats.
+    compile "com.fasterxml.jackson.module:jackson-module-kotlin:${jackson_version}"
+    // Yaml is useful for parsing strings to method calls.
+    compile "com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:$jackson_version"
+    // This adds support for java.time types.
+    compile "com.fasterxml.jackson.datatype:jackson-datatype-jsr310:$jackson_version"
 
-    testCompile group: 'junit', name: 'junit', version: '4.11'
+    testCompile "junit:junit:$junit_version"
 }
