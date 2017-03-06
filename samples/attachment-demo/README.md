@@ -1,6 +1,6 @@
 # Attachment Demo 
 
-This code demonstrates sending a transaction with an attachment from one to node to another, and the receiving node accessing the attachment.
+This code demonstrates sending a transaction with an attachment from one node to another, and the receiving node accessing the attachment.
 
 Please see the either the [online documentation](https://docs.corda.net/running-the-demos.html#attachment-demo) for more info on the attachment demo, or the [included offline version](../../docs/build/html/running-the-demos.html#attachment-demo).
 
